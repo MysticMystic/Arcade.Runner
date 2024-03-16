@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arcade Runner</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #222;
+    }
+    canvas {
+      display: block;
+    }
+    .end-screen, .start-screen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 24px;
+    }
+    .end-screen button, .start-screen button {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 18px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    .end-screen button:hover, .start-screen button:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div class="end-screen" id="endScreen" style="display:none;">
+    <div id="endScore"></div>
+    <button id="restartButton">Restart</button>
+    <button id="highScoreButton">High Score</button>
+  </div>
+  <div class="start-screen" id="startScreen">
+    <h1>Arcade Runner</h1>
+    <p>Press any key to start</p>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let gameStarted = false;
+    let gameOver = false;
+
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      size: 20,
+      speed: 3,
+      velocityX: 0,
+      velocityY: 0,
+      dashCooldown: 1000,
+      dashDistance: 100,
+      isDashing: false,
+      lastDashTime: 0
+    };
+
+    let obstacles = [];
+    const obstacleCount = 20;
+    const obstacleSpeedRange = [2, 5];
+    const obstacleSizeRange = [20, 80];
+
+    function initializeObstacles() {
+      obstacles = Array.from({ length: obstacleCount }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.random() * (obstacleSizeRange[1] - obstacleSizeRange[0]) + obstacleSizeRange[0],
+        speed: Math.random() * (obstacleSpeedRange[1] - obstacleSpeedRange[0]) + obstacleSpeedRange[0]
+      }));
+    }
+
+    initializeObstacles();
+
+    let greenObstacles = [];
+    const greenObstacleSpeedRatio = 0.5;
+
+    function initializeGreenObstacles() {
+      const greenObstacleCount = 5;
+      greenObstacles = Array.from({ length: greenObstacleCount }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.random() * (player.size - 10) + 10, // Adjusted size to be within a reasonable range
+        chasingSpeed: player.speed / 2
+      }));
+    }
+
+    initializeGreenObstacles();
+
+    let coins = [];
+    const coinInterval = 1000;
+    const maxCoins = 10;
+
+    setInterval(() => {
+      if (gameStarted && coins.length < maxCoins) {
+        coins.push({
+          x: Math.random() * canvas.width,
+          y: -10
+        });
+      }
+    }, coinInterval);
+
+    let score = 0;
+    let highScore = localStorage.getItem('highScore') || 0;
+
+    let blueCircle = null;
+
+    function drawGrid() {
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 20) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 20) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawStartScreen() {
+      document.getElementById('startScreen').style.display = 'block';
+    }
+
+    function hideStartScreen() {
+      document.getElementById('startScreen').style.display = 'none';
+    }
+
+    function drawObstacles() {
+      ctx.fillStyle = 'red';
+      obstacles.forEach(obstacle => {
+        ctx.fillRect(obstacle.x - obstacle.size / 2, obstacle.y - obstacle.size / 2, obstacle.size, obstacle.size);
+      });
+    }
+
+    function drawPlayer() {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
+    }
+
+    function drawGreenObstacles() {
+      ctx.fillStyle = 'green';
+      greenObstacles.forEach(greenObstacle => {
+        ctx.fillRect(greenObstacle.x - greenObstacle.size / 2, greenObstacle.y - greenObstacle.size / 2, greenObstacle.size, greenObstacle.size);
+      });
+    }
+
+    function drawCoins() {
+      ctx.fillStyle = 'yellow';
+      coins.forEach(coin => {
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function drawScore() {
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.fillText('Score: ' + score, 10, 40);
+      ctx.fillText('High Score: ' + highScore, 10, 80);
+    }
+
+    function movePlayer() {
+      if (player.isDashing) return;
+
+      player.x += player.velocityX;
+      player.y += player.velocityY;
+
+      player.x = Math.max(player.size / 2, Math.min(player.x, canvas.width - player.size / 2));
+      player.y = Math.max(player.size / 2, Math.min(player.y, canvas.height - player.size / 2));
+    }
+
+    function dash() {
+      if (player.isDashing || Date.now() - player.lastDashTime < player.dashCooldown) return;
+
+      const angle = Math.atan2(player.velocityY, player.velocityX);
+      const dx = player.dashDistance * Math.cos(angle);
+      const dy = player.dashDistance * Math.sin(angle);
+
+      player.x += dx;
+      player.y += dy;
+
+      player.isDashing = true;
+      setTimeout(() => {
+        player.isDashing = false;
+        player.lastDashTime = Date.now();
+      }, player.dashCooldown);
+    }
+
+    function moveObstacles() {
+      obstacles.forEach(obstacle => {
+        obstacle.y += obstacle.speed;
+        if (obstacle.y > canvas.height) {
+          obstacle.y = 0;
+          obstacle.x = Math.random() * canvas.width;
+        }
+      });
+    }
+
+    function moveGreenObstacles() {
+      greenObstacles.forEach(greenObstacle => {
+        const dx = player.x - greenObstacle.x;
+        const dy = player.y - greenObstacle.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const directionX = dx / distance;
+        const directionY = dy / distance;
+        greenObstacle.x += directionX * greenObstacle.chasingSpeed;
+        greenObstacle.y += directionY * greenObstacle.chasingSpeed;
+
+        // Check collision with player
+        if (
+          player.x < greenObstacle.x + greenObstacle.size &&
+          player.x + player.size > greenObstacle.x &&
+          player.y < greenObstacle.y + greenObstacle.size &&
+          player.y + player.size > greenObstacle.y
+        ) {
+          gameOver = true; // Game over if player touches green obstacle
+        }
+      });
+    }
+
+    function moveCoins() {
+      coins.forEach(coin => {
+        coin.y += 3; // Adjust speed as needed
+        if (coin.y > canvas.height) {
+          coin.y = -10;
+          coin.x = Math.random() * canvas.width;
+        }
+      });
+    }
+
+    function checkCollisions() {
+      obstacles.forEach(obstacle => {
+        if (
+          player.x < obstacle.x + obstacle.size &&
+          player.x + player.size > obstacle.x &&
+          player.y < obstacle.y + obstacle.size &&
+          player.y + player.size > obstacle.y
+        ) {
+          gameOver = true;
+        }
+      });
+
+      coins.forEach((coin, index) => {
+        if (
+          player.x < coin.x + 5 &&
+          player.x + player.size > coin.x - 5 &&
+          player.y < coin.y + 5 &&
+          player.y + player.size > coin.y - 5
+        ) {
+          coins.splice(index, 1);
+          score += 10;
+        }
+      });
+
+      if (player.x < 0 || player.x > canvas.width || player.y < 0 || player.y > canvas.height) {
+        gameOver = true;
+      }
+
+      // Check collision with blue circle
+      if (blueCircle) {
+        const dx = player.x - blueCircle.x;
+        const dy = player.y - blueCircle.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < blueCircle.radius + player.size / 2) {
+          // Teleport blue circle to a new random location
+          blueCircle.x = Math.random() * canvas.width;
+          blueCircle.y = Math.random() * canvas.height;
+
+          // Teleport green obstacles to new random locations
+          greenObstacles.forEach(greenObstacle => {
+            greenObstacle.x = Math.random() * canvas.width;
+            greenObstacle.y = Math.random() * canvas.height;
+          });
+        }
+      }
+    }
+
+    function addRandomBlueCircle() {
+      if (!blueCircle) {
+        const circleRadius = 10 + Math.random() * 20; // Adjust radius as desired
+        blueCircle = {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radius: circleRadius
+        };
+      }
+
+      ctx.fillStyle = 'blue';
+      ctx.beginPath();
+      ctx.arc(blueCircle.x, blueCircle.y, blueCircle.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function gameLoop() {
+      clearCanvas();
+      drawGrid();
+      if (gameStarted) {
+        if (!gameOver) {
+          movePlayer();
+          drawPlayer();
+          moveObstacles();
+          drawObstacles();
+          moveGreenObstacles();
+          drawGreenObstacles();
+          moveCoins();
+          drawCoins();
+          drawScore();
+          checkCollisions();
+          addRandomBlueCircle();
+        } else {
+          document.getElementById('endScreen').style.display = 'block';
+          document.getElementById('endScore').innerText = 'Your Score: ' + score;
+          if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('highScore', highScore);
+          }
+        }
+      } else {
+        drawStartScreen();
+      }
+      requestAnimationFrame(gameLoop);
+    }
+
+    document.addEventListener('keydown', function (event) {
+      if (!gameStarted) {
+        gameStarted = true;
+        hideStartScreen();
+      }
+      switch (event.key) {
+        case 'w':
+          player.velocityY = -player.speed;
+          break;
+        case 's':
+          player.velocityY = player.speed;
+          break;
+        case 'a':
+          player.velocityX = -player.speed;
+          break;
+        case 'd':
+          player.velocityX = player.speed;
+          break;
+      }
+    });
+
+    document.addEventListener('keyup', function (event) {
+      switch (event.key) {
+        case 'w':
+        case 's':
+          player.velocityY = 0;
+          break;
+        case 'a':
+        case 'd':
+          player.velocityX = 0;
+          break;
+      }
+    });
+
+    document.getElementById('restartButton').addEventListener('click', function () {
+      gameOver = false;
+      score = 0;
+      initializeObstacles();
+      initializeGreenObstacles();
+      coins = [];
+      blueCircle = null; // Reset blue circle
+      document.getElementById('endScreen').style.display = 'none';
+    });
+
+    gameLoop();
+  </script>
+</body>
+</html>
